@@ -445,6 +445,11 @@ function initDB(){
     dbReady = true;
     setDbBadge('CLOUD ☁️', 'rgba(0,224,150,.1)', 'var(--green)');
     loadTodayFromDB();
+    // Fetch Anthropic key from Supabase config
+    sbClient.from('body_os_config').select('value').eq('key','anthropic_key').single()
+      .then(function(res){
+        if(res.data) window._anthropicKey = res.data.value;
+      });
   } catch(e) {
     setDbBadge('LOCAL', 'rgba(255,204,0,.1)', 'var(--amber)');
   }
@@ -528,7 +533,12 @@ async function estimateMacros(foodDescription){
   try{
     const res=await fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:{
+        'Content-Type':'application/json',
+        'x-api-key': window._anthropicKey||'',
+        'anthropic-version':'2023-06-01',
+        'anthropic-dangerous-direct-browser-access':'true'
+      },
       body:JSON.stringify({
         model:'claude-sonnet-4-20250514',
         max_tokens:200,
