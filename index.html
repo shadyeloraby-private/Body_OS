@@ -531,6 +531,7 @@ function saveDay(state,key,day){
 ══════════════════════════════════════════ */
 async function estimateMacros(foodDescription){
   try{
+    if(!window._anthropicKey){console.warn('No API key loaded yet');return null;}
     const res=await fetch('https://api.anthropic.com/v1/messages',{
       method:'POST',
       headers:{
@@ -544,17 +545,13 @@ async function estimateMacros(foodDescription){
         max_tokens:200,
         messages:[{
           role:'user',
-          content:`Estimate the calories and protein for this meal. Reply ONLY with valid JSON, no markdown, no explanation:
-{"calories": number, "protein": number}
-
-Meal: ${foodDescription}
-
-Be realistic. If multiple items, sum them. Protein in grams, calories as integer.`
+          content:'Estimate the calories and protein for this meal. Reply ONLY with valid JSON, no markdown, no explanation:\n{"calories": number, "protein": number}\n\nMeal: '+foodDescription+'\n\nBe realistic. If multiple items, sum them. Protein in grams, calories as integer.'
         }]
       })
     });
     const data=await res.json();
-    const text=data.content?.[0]?.text||'';
+    console.log('AI response:', JSON.stringify(data));
+    const text=(data.content&&data.content[0]&&data.content[0].text)||'';
     const clean=text.replace(/```json|```/g,'').trim();
     const parsed=JSON.parse(clean);
     if(typeof parsed.calories==='number'&&typeof parsed.protein==='number'){
@@ -562,7 +559,7 @@ Be realistic. If multiple items, sum them. Protein in grams, calories as integer
     }
     return null;
   }catch(e){
-    console.warn('AI estimation failed:',e);
+    console.error('AI estimation failed:',e);
     return null;
   }
 }
@@ -996,36 +993,43 @@ function renderFood(){
 }
 
 async function saveMeal(id){
-  const food=document.getElementById('food-'+id)?.value?.trim();
+  const foodEl=document.getElementById('food-'+id);
+  const food=foodEl&&foodEl.value?foodEl.value.trim():'';
   if(!food){alert('Write what you ate');return;}
 
   const btn=document.getElementById('save-btn-'+id);
   const statusEl=document.getElementById('ai-status-'+id);
   btn.disabled=true;
-  btn.innerHTML='<span class="ai-loading">✨ Analysing with AI...</span>';
-  if(statusEl)statusEl.textContent='Claude is estimating your macros...';
+  btn.innerHTML='<span class="ai-loading">✨ Analysing...</span>';
 
   let macros=null;
-  try{
-    macros=await estimateMacros(food);
-  }catch(e){console.warn('Estimation error:',e);}
+  try{macros=await estimateMacros(food);}catch(e){console.warn(e);}
+
+  if(!macros){
+    // AI failed — show manual input
+    btn.disabled=false;
+    btn.innerHTML='<span>Save manually</span>';
+    if(statusEl){
+      statusEl.innerHTML='AI unavailable — enter manually:<br><div style="display:flex;gap:8px;margin-top:6px"><input id="cal-'+id+'" type="number" placeholder="kcal" style="flex:1;background:var(--bg3);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:6px 10px;color:var(--text);font-size:12px;outline:none"><input id="pro-'+id+'" type="number" placeholder="protein g" style="flex:1;background:var(--bg3);border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:6px 10px;color:var(--text);font-size:12px;outline:none"></div>';
+    }
+    btn.onclick=function(){
+      const cal=parseInt(document.getElementById('cal-'+id)&&document.getElementById('cal-'+id).value||0);
+      const pro=parseInt(document.getElementById('pro-'+id)&&document.getElementById('pro-'+id).value||0);
+      const {day,state,key}=getDay();
+      if(!day.meals)day.meals={};
+      day.meals[id]={food,calories:cal,protein:pro,ai_estimated:false,time:new Date().toTimeString().slice(0,5)};
+      saveDay(state,key,day);renderFood();
+      flash('SAVED!','Meal logged manually');
+    };
+    return;
+  }
 
   const {day,state,key}=getDay();
   if(!day.meals)day.meals={};
-  day.meals[id]={
-    food,
-    calories:macros?.calories||0,
-    protein:macros?.protein||0,
-    ai_estimated:!!macros,
-    time:new Date().toTimeString().slice(0,5)
-  };
+  day.meals[id]={food,calories:macros.calories,protein:macros.protein,ai_estimated:true,time:new Date().toTimeString().slice(0,5)};
   saveDay(state,key,day);
   renderFood();
-  if(macros){
-    flash('LOGGED!',`~${macros.calories} kcal · ~${macros.protein}g protein`);
-  }else{
-    flash('SAVED!','Meal logged (add macros manually)');
-  }
+  flash('LOGGED!','~'+macros.calories+' kcal · ~'+macros.protein+'g protein');
 }
 
 function editMeal(id){
